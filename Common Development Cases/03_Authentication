@@ -1,0 +1,388 @@
+# Authentication
+
+## Implementing Authentication
+### 1. Using NextAuth.js
+
+**Example:**
+
+```tsx
+// pages/api/auth/[...nextauth].ts
+import NextAuth from 'next-auth';
+import GoogleProvider from 'next-auth/providers/google';
+
+// NextAuth configuration
+export default NextAuth({
+  providers: [
+    GoogleProvider({
+      clientId: process.env.GOOGLE_CLIENT_ID as string,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
+    }),
+  ],
+  // Add custom configurations if needed
+});
+
+// pages/_app.tsx
+import { SessionProvider } from 'next-auth/react';
+
+// Wrap your application with SessionProvider
+function MyApp({ Component, pageProps }: any) {
+  return (
+    <SessionProvider session={pageProps.session}>
+      <Component {...pageProps} />
+    </SessionProvider>
+  );
+}
+
+export default MyApp;
+
+// pages/index.tsx
+import { signIn, signOut, useSession } from 'next-auth/react';
+
+// Component to display authentication status
+const Home: React.FC = () => {
+  const { data: session } = useSession();
+
+  return (
+    <div>
+      <h1>NextAuth.js Authentication</h1>
+      {!session ? (
+        <button onClick={() => signIn('google')}>Sign in with Google</button>
+      ) : (
+        <>
+          <p>Welcome, {session.user?.name}</p>
+          <button onClick={() => signOut()}>Sign out</button>
+        </>
+      )}
+    </div>
+  );
+};
+
+export default Home;
+```
+
+**Comments:**
+- **NextAuth Configuration**: Uses `NextAuth` to configure authentication providers like Google.
+- **Session Management**: `SessionProvider` is used to manage authentication state.
+- **Authentication Buttons**: `signIn` and `signOut` functions handle user sign-in and sign-out actions.
+
+### 2. JWT and Session Management
+
+**Example:**
+
+```tsx
+// pages/api/auth/login.ts
+import type { NextApiRequest, NextApiResponse } from 'next';
+import jwt from 'jsonwebtoken';
+
+const secret = process.env.JWT_SECRET as string;
+
+export default function login(req: NextApiRequest, res: NextApiResponse) {
+  // Validate user credentials (mocked)
+  if (req.method === 'POST' && req.body.username === 'user' && req.body.password === 'pass') {
+    const token = jwt.sign({ username: req.body.username }, secret, { expiresIn: '1h' });
+    res.status(200).json({ token });
+  } else {
+    res.status(401).json({ message: 'Unauthorized' });
+  }
+}
+
+// pages/api/auth/me.ts
+import type { NextApiRequest, NextApiResponse } from 'next';
+import jwt from 'jsonwebtoken';
+
+const secret = process.env.JWT_SECRET as string;
+
+export default function me(req: NextApiRequest, res: NextApiResponse) {
+  const token = req.headers.authorization?.split(' ')[1];
+
+  if (token) {
+    try {
+      const user = jwt.verify(token, secret);
+      res.status(200).json(user);
+    } catch {
+      res.status(401).json({ message: 'Invalid Token' });
+    }
+  } else {
+    res.status(401).json({ message: 'No Token Provided' });
+  }
+}
+
+// pages/_app.tsx
+import { useEffect, useState } from 'react';
+
+function MyApp({ Component, pageProps }: any) {
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    // Fetch user info from API
+    fetch('/api/auth/me')
+      .then(res => res.json())
+      .then(data => setUser(data))
+      .catch(() => setUser(null));
+  }, []);
+
+  return (
+    <Component {...pageProps} user={user} />
+  );
+}
+
+export default MyApp;
+
+// pages/index.tsx
+import { useState } from 'react';
+
+// Login component
+const Home: React.FC<{ user: any }> = ({ user }) => {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+
+  const handleLogin = async () => {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+
+    const { token } = await res.json();
+    localStorage.setItem('token', token);
+    window.location.reload();
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    window.location.reload();
+  };
+
+  return (
+    <div>
+      <h1>JWT Authentication</h1>
+      {user ? (
+        <>
+          <p>Welcome, {user.username}</p>
+          <button onClick={handleLogout}>Sign out</button>
+        </>
+      ) : (
+        <>
+          <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" />
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" />
+          <button onClick={handleLogin}>Sign in</button>
+        </>
+      )}
+    </div>
+  );
+};
+
+export default Home;
+```
+
+**Comments:**
+
+- **Login API**: `/api/auth/login` validates credentials and returns a JWT.
+- **Me API**: `/api/auth/me` checks token validity and retrieves user data.
+- **Session Management**: JWT stored in local storage and checked on app load.
+
+
+
+## Protecting Routes
+### 1. Guarding API Routes
+
+**Example:**
+
+```tsx
+// pages/api/protected.ts
+import type { NextApiRequest, NextApiResponse } from 'next';
+import jwt from 'jsonwebtoken';
+
+const secret = process.env.JWT_SECRET as string;
+
+export default function protectedRoute(req: NextApiRequest, res: NextApiResponse) {
+  const token = req.headers.authorization?.split(' ')[1];
+
+  if (token) {
+    try {
+      jwt.verify(token, secret);
+      res.status(200).json({ message: 'Protected content' });
+    } catch {
+      res.status(401).json({ message: 'Invalid Token' });
+    }
+  } else {
+    res.status(401).json({ message: 'No Token Provided' });
+  }
+}
+
+// pages/protected.tsx
+import { useEffect, useState } from 'react';
+
+const ProtectedPage: React.FC = () => {
+  const [data, setData] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchProtectedData = async () => {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/protected', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.ok) {
+        const result = await res.json();
+        setData(result.message);
+      } else {
+        setData('Access denied');
+      }
+    };
+
+    fetchProtectedData();
+  }, []);
+
+  return (
+    <div>
+      <h1>Protected Page</h1>
+      <p>{data}</p>
+    </div>
+  );
+};
+
+export default ProtectedPage;
+```
+
+**Comments:**
+
+- **Protected API Route**: `/api/protected` checks JWT token for access.
+- **Protected Page**: Fetches data from the API using JWT from local storage.
+
+### 2. Custom Middleware for Protection
+
+**Example:**
+
+```tsx
+// middleware/auth.ts
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+
+export function middleware(req: NextRequest) {
+  const token = req.headers.get('authorization')?.replace('Bearer ', '');
+
+  if (token && isValidToken(token)) {
+    return NextResponse.next();
+  } else {
+    return NextResponse.redirect('/login');
+  }
+}
+
+// Simple token validation function
+const isValidToken = (token: string) => {
+  // Replace with actual token validation logic
+  return token === 'valid-token';
+}
+
+// pages/_middleware.ts
+import { middleware } from './middleware/auth';
+export { middleware };
+
+// pages/protected.tsx
+import { useEffect, useState } from 'react';
+
+const ProtectedPage: React.FC = () => {
+  const [data, setData] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchProtectedData = async () => {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/protected', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.ok) {
+        const result = await res.json();
+        setData(result.message);
+      } else {
+        setData('Access denied');
+      }
+    };
+
+    fetchProtectedData();
+  }, []);
+
+  return (
+    <div>
+      <h1>Protected Page</h1>
+      <p>{data}</p>
+    </div>
+  );
+};
+
+export default ProtectedPage;
+```
+
+**Comments:**
+
+- **Custom Middleware**: Checks JWT validity and protects routes.
+- **Protected Page**: Uses `Authorization` header to fetch protected data.
+
+
+
+## Role-based Access Control (RBAC)
+### Managing User Roles and Permissions
+
+**Example:**
+
+```tsx
+// utils/auth.ts
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+
+export function middleware(req: NextRequest) {
+  const token = req.headers.get('authorization')?.replace('Bearer ', '');
+  const userRole = getUserRoleFromToken(token); // Assume function extracts role from token
+
+  if (userRole === 'admin') {
+    return NextResponse.next();
+  } else {
+    return NextResponse.redirect('/403'); // Redirect to a 403 Forbidden page
+  }
+}
+
+const getUserRoleFromToken = (token: string | null) => {
+  // Replace with actual role extraction logic
+  return token === 'admin-token' ? 'admin' : 'user';
+};
+
+// pages/protected.tsx
+import { useEffect, useState } from 'react';
+
+const ProtectedPage: React.FC = () => {
+  const [data, setData] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchProtectedData = async () => {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/protected', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.ok) {
+        const result = await res.json();
+        setData(result.message);
+      } else {
+        setData('Access denied');
+      }
+    };
+
+    fetchProtectedData();
+  }, []);
+
+  return (
+    <div>
+      <h1>Admin Only Page</h1>
+      <p>{data}</p>
+    </div>
+  );
+};
+
+export default ProtectedPage;
+```
+
+**Comments:**
+
+- **Middleware**: Checks user role and manages access based on roles.
+- **Protected Page**: Displays data based on user permissions.

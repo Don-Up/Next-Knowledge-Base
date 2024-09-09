@@ -1,0 +1,32 @@
+# API Rate Limiting
+
+## Implementing Rate Limiting in API Routes
+
+To limit API requests, use a rate limiter like `express-rate-limit`. Integrate it in API routes to manage traffic.
+
+**Example:**
+
+```ts
+// pages/api/hello.ts
+import type { NextApiRequest, NextApiResponse } from 'next';
+import rateLimit from 'express-rate-limit';
+import nextConnect from 'next-connect';
+
+// Configure rate limiter
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: 'Too many requests, please try again later.',
+});
+
+const handler = nextConnect<NextApiRequest, NextApiResponse>();
+
+// Apply rate limiter middleware
+handler.use(limiter).get((req, res) => {
+  res.status(200).json({ message: 'Hello, world!' });
+});
+
+export default handler;
+```
+
+In this example, `express-rate-limit` is used to limit requests to 100 per 15 minutes for each IP.
